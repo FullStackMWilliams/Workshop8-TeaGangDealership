@@ -9,7 +9,7 @@ public class Vehicle {
     private int year;
     private String make;
     private String model;
-    private String vehicle_type;
+    private String type;
     private String color;
     private long odometer;
     private double price;
@@ -20,7 +20,7 @@ public class Vehicle {
         this.year = year;
         this.make = make;
         this.model = model;
-        this.vehicle_type = type;
+        this.type = type;
         this.color = color;
         this.odometer = odometer;
         this.price = price;
@@ -59,11 +59,11 @@ public class Vehicle {
     }
 
     public String getType() {
-        return vehicle_type;
+        return type;
     }
 
     public void setType(String type) {
-        this.vehicle_type = type;
+        this.type = type;
     }
 
     public String getColor() {
@@ -91,10 +91,10 @@ public class Vehicle {
     }
 
     public String toPipe(){
-        return vin + "|" + year + "|" + make + "|" + model + "|" + vehicle_type + "|" + color + "|" + odometer + "|" + String.format("%.2f", price);
+        return vin + "|" + year + "|" + make + "|" + model + "|" + type + "|" + color + "|" + odometer + "|" + String.format("%.2f", price);
     }
     public String toString() {
-        return String.format("%-6d %-4d %-10s %-12s %-6s %-10s %9d $%,10.2f", vin, year, make, model, vehicle_type, color, odometer, price);
+        return String.format("%-6d %-4d %-10s %-12s %-6s %-10s %9d $%,10.2f", vin, year, make, model, type, color, odometer, price);
     }
 
     public static Vehicle fromPipe(String line) {
@@ -131,13 +131,13 @@ public class Vehicle {
                 Double.compare(vehicle.price, price) == 0 &&
                 Objects.equals(make, vehicle.make) &&
                 Objects.equals(model, vehicle.model) &&
-                Objects.equals(vehicle_type, vehicle.vehicle_type) &&
+                Objects.equals(type, vehicle.type) &&
                 Objects.equals(color, vehicle.color);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(vin, year, make, model, vehicle_type, color, odometer, price);
+        return Objects.hash(vin, year, make, model, type, color, odometer, price);
     }
 
     public String toDataString() {

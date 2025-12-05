@@ -83,7 +83,7 @@ public class DealershipFileManager {
 
             // 2. Load all vehicles with that dealership_id
             String vehicleSql = """
-                SELECT vin, make, model, year, price, color, odometer, sold
+                SELECT vin, make, model, type, year, price, color, odometer, sold
                 FROM vehicles
                 WHERE dealership_id = ?
             """;
@@ -102,18 +102,12 @@ public class DealershipFileManager {
                         String color   = rs.getString("color");
                         int odometer   = rs.getInt("odometer");
                         boolean sold   = rs.getBoolean("sold");
+                        String type = rs.getString("type");
 
-                        String type = sold ? "Sold" : "Available";
+                        String type1 = sold ? "Sold" : "Available";
 
                         Vehicle v = new Vehicle(
-                                vin,
-                                year,
-                                make,
-                                model,
-                                type,
-                                color,
-                                odometer,
-                                price
+                         vin, year, make, model, type, color, odometer, price
                         );
 
                         dealership.addVehicle(v);
