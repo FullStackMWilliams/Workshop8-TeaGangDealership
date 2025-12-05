@@ -1,43 +1,79 @@
 package com.pluralsight.dealership;
 
-import java.io.FileWriter;
-import java.io.IOException;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 
 public class ContractFileManager {
-    private static final String FILE_NAME = "contracts.csv";
 
     public void saveContract(Contract contract) {
-        try (FileWriter writer = new FileWriter(FILE_NAME, true)) {
-            StringBuilder sb = new StringBuilder();
+        if (contract instanceof SalesContract sale) {
+            saveSalesContract(sale);
+        } else if (contract instanceof LeaseContract lease) {
+            saveLeaseContract(lease);
+        } else {
+            throw new IllegalArgumentException(
+                    "Unsupported contract type: " + contract.getClass().getName()
+            );
+        }
+    }
 
-            if (contract instanceof SalesContract sale) {
-                sb.append("SALE|")
-                        .append(sale.getDate()).append("|")
-                        .append(sale.getCustomerName()).append("|")
-                        .append(sale.getCustomerEmail()).append("|")
-                        .append(sale.getVehicleSold().toDataString()).append("|")
-                        .append(String.format("%.2f", sale.getTotalPrice())).append("|")
-                        .append(sale.isFinanceOption() ? "YES" : "NO").append("|")
-                        .append(String.format("%.2f", sale.getMonthlyPayment()))
-                        .append("\n");
+    private void saveSalesContract(SalesContract sale) {
+        String sql = """
+            INSERT INTO sales_contracts (
+                customer_name,
+                customer_email,
+                vehicle_vin,
+                financial_option
+            )
+            VALUES (?, ?, ?, ?)
+            """;
 
-            } else if (contract instanceof LeaseContract lease) {
-                sb.append("LEASE|")
-                        .append(lease.getDate()).append("|")
-                        .append(lease.getCustomerName()).append("|")
-                        .append(lease.getCustomerEmail()).append("|")
-                        .append(lease.getVehicleSold().toDataString()).append("|")
-                        .append(String.format("%.2f", lease.getExpectedEndingValue())).append("|")
-                        .append(String.format("%.2f", lease.getLeaseFee())).append("|")
-                        .append(String.format("%.2f", lease.getTotalPrice())).append("|")
-                        .append(String.format("%.2f", lease.getMonthlyPayment()))
-                        .append("\n");
-            }
+        try (Connection conn = DatabaseUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            writer.write(sb.toString());
-            System.out.println("✅ Contract saved successfully!");
-        } catch (IOException e) {
-            System.err.println("❌ Error saving contract: " + e.getMessage());
+            ps.setString(1, sale.getCustomerName());
+            ps.setString(2, sale.getCustomerEmail());
+
+            // Adjust if your Vehicle class exposes VIN differently
+            String vin = String.valueOf(sale.getVehicleSold().getVin());
+            ps.setString(3, vin);
+
+            ps.setBoolean(4, sale.isFinanceOption());
+
+            ps.executeUpdate();
+            System.out.println("✅ Sales contract saved to Supabase!");
+
+        } catch (SQLException e) {
+            System.err.println("❌ Error saving sales contract: " + e.getMessage());
+        }
+    }
+
+    private void saveLeaseContract(LeaseContract lease) {
+        String sql = """
+            INSERT INTO lease_contracts (
+                customer_name,
+                customer_email,
+                vehicle_vin
+            )
+            VALUES (?, ?, ?)
+            """;
+
+        try (Connection conn = DatabaseUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, lease.getCustomerName());
+            ps.setString(2, lease.getCustomerEmail());
+
+            // Adjust if your Vehicle class exposes VIN differently
+            String vin = String.valueOf(lease.getVehicleSold().getVin());
+            ps.setString(3, vin);
+
+            ps.executeUpdate();
+            System.out.println("✅ Lease contract saved to Supabase!");
+
+        } catch (SQLException e) {
+            System.err.println("❌ Error saving lease contract: " + e.getMessage());
         }
     }
 }

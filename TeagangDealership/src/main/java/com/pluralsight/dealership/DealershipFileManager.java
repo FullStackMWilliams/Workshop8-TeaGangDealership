@@ -1,13 +1,15 @@
 package com.pluralsight.dealership;
 
-import java.io.*;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 public class DealershipFileManager {
 
-    // --- Summary statistics ---
+    // --- Statistics (kept for UI compatibility) ---
     private int vehiclesLoaded = 0;
     private int vehiclesSkipped = 0;
     private int duplicateCount = 0;
@@ -18,9 +20,9 @@ public class DealershipFileManager {
         duplicateCount = 0;
     }
 
-    public int getVehiclesLoaded()     { return vehiclesLoaded; }
-    public int getVehiclesSkipped()    { return vehiclesSkipped; }
-    public int getDuplicateCount()     { return duplicateCount; }
+    public int getVehiclesLoaded()  { return vehiclesLoaded; }
+    public int getVehiclesSkipped() { return vehiclesSkipped; }
+    public int getDuplicateCount()  { return duplicateCount; }
 
     public void printSummaryReport() {
         System.out.println("\n📊 Dealership Data Summary");
@@ -33,152 +35,174 @@ public class DealershipFileManager {
         System.out.println("📁 Total records processed: " + total + "\n");
     }
 
-
-    private final java.util.List<String> skippedRecords = new java.util.ArrayList<>();
-
-    public java.util.List<String> getSkippedRecords() {
+    // Kept for compatibility; DB does not skip records
+    private final List<String> skippedRecords = new ArrayList<>();
+    public List<String> getSkippedRecords() {
         return skippedRecords;
     }
 
-    private final Path dataPath;
+    // Constructors kept for compatibility; filename is unused
+    public DealershipFileManager() { this("inventory.csv"); }
+    public DealershipFileManager(String filename) { }
 
-    public DealershipFileManager() {
-        this("inventory.csv");
-    }
-
-    public DealershipFileManager(String filename) {
-        this.dataPath = Path.of(filename);
-    }
-
+    /**
+     * Loads the dealership and its vehicles from Supabase.
+     */
     public Dealership getDealership() {
+        resetStats();
+        skippedRecords.clear();
 
-        resetStats(); // ✅ Reset counters each time we load
+        try (Connection conn = DatabaseUtil.getConnection()) {
 
-        // If file missing → create default dealership
-        if (!Files.exists(dataPath)) {
-            return new Dealership("Your Dealership", "123 Main st", "888-888-8888");
-        }
+            // 1. Load dealership (always use the first one)
+            String dealershipSql = """
+                SELECT dealership_id, name, address, phone
+                FROM dealerships
+                ORDER BY dealership_id
+                LIMIT 1;
+            """;
 
-        try (BufferedReader br = Files.newBufferedReader(dataPath, StandardCharsets.UTF_8)) {
-            String header = br.readLine();
+            Dealership dealership;
+            int dealershipId;
 
-            // Handle missing or blank header
-            if (header == null || header.isBlank()) {
-                return new Dealership("Your Dealership", "Your address", "000-000-0000");
+            try (PreparedStatement ps = conn.prepareStatement(dealershipSql);
+                 ResultSet rs = ps.executeQuery()) {
+
+                if (rs.next()) {
+                    dealershipId = rs.getInt("dealership_id");
+                    String name = rs.getString("name");
+                    String address = rs.getString("address");
+                    String phone = rs.getString("phone");
+
+                    dealership = new Dealership(name, address, phone);
+                } else {
+                    // No dealership found → return default
+                    return new Dealership("Your Dealership", "123 Main st", "888-888-8888");
+                }
             }
 
-            // Parse header
-            String[] d = header.split("\\|");
-            String name = d.length > 0 ? d[0].trim() : "Your Dealership";
-            String address = d.length > 1 ? d[1].trim() : "123 Main st";
-            String phone = d.length > 2 ? d[2].trim() : "000-000-0000";
+            // 2. Load all vehicles with that dealership_id
+            String vehicleSql = """
+                SELECT vin, make, model, year, price, color, odometer, sold
+                FROM vehicles
+                WHERE dealership_id = ?
+            """;
 
-            Dealership dealership = new Dealership(name, address, phone);
+            try (PreparedStatement ps = conn.prepareStatement(vehicleSql)) {
+                ps.setInt(1, dealershipId);
 
-            String line;
-            while ((line = br.readLine()) != null) {
-                if (line.isBlank()) continue;
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        String vinStr  = rs.getString("vin");
+                        int vin        = Integer.parseInt(vinStr);
+                        String make    = rs.getString("make");
+                        String model   = rs.getString("model");
+                        int year       = rs.getInt("year");
+                        double price   = rs.getDouble("price");
+                        String color   = rs.getString("color");
+                        int odometer   = rs.getInt("odometer");
+                        boolean sold   = rs.getBoolean("sold");
 
-                String[] p = line.split("\\|");
+                        String type = sold ? "Sold" : "Available";
 
-                // ✅ Validate vehicle data before parsing
-                if (!isValidVehicleData(p)) {
-                    System.err.println("⚠️ Invalid vehicle data skipped: " + line);
-                    skippedRecords.add(line);
-                    vehiclesSkipped++; // ⬅️ Count skipped lines
-                    continue;
-                }
+                        Vehicle v = new Vehicle(
+                                vin,
+                                year,
+                                make,
+                                model,
+                                type,
+                                color,
+                                odometer,
+                                price
+                        );
 
-                try {
-                    int vin = Integer.parseInt(p[0].trim());
-                    int year = Integer.parseInt(p[1].trim());
-                    String make = p[2].trim();
-                    String model = p[3].trim();
-                    String type = p[4].trim();
-                    String color = p[5].trim();
-                    long odometer = Long.parseLong(p[6].trim());
-                    double price = Double.parseDouble(p[7].trim());
-
-                    // ✅ Check for duplicate VIN before adding
-                    if (dealership.getAllVehicles().stream().anyMatch(v -> v.getVin() == vin)) {
-                        System.err.println("⚠️ Duplicate VIN " + vin + " found. Skipping duplicate record.");
-                        duplicateCount++; // ⬅️ Count duplicates
-                        continue;
+                        dealership.addVehicle(v);
+                        vehiclesLoaded++;
                     }
-
-                    dealership.addVehicle(new Vehicle(vin, year, make, model, type, color, odometer, price));
-                    vehiclesLoaded++; // ⬅️ Count successfully loaded vehicles
-
-                } catch (Exception ex) {
-                    System.err.println("❌ Skipping corrupt record: " + line);
-                    vehiclesSkipped++; // ⬅️ Count parsing errors as skipped
                 }
             }
 
             return dealership;
 
-        } catch (IOException e) {
-            System.err.println("⚠️ Failed to read dealership file: " + e.getMessage());
+        } catch (SQLException e) {
+            System.err.println("⚠️ Error loading dealership from Supabase: " + e.getMessage());
             return new Dealership("Your Dealership", "123 Main st", "000-000-0000");
         }
     }
 
+    /**
+     * Saves the dealership + all vehicles to Supabase.
+     */
     public void saveDealership(Dealership d) {
-        try (BufferedWriter bw = Files.newBufferedWriter(dataPath, StandardCharsets.UTF_8)) {
-            bw.write(d.getName() + "|" + d.getAddress() + "|" + d.getPhone());
-            bw.newLine();
+        try (Connection conn = DatabaseUtil.getConnection()) {
 
-            for (Vehicle vehicle : d.getAllVehicles()) {
-                bw.write(vehicle.toPipe());
-                bw.newLine();
+            conn.setAutoCommit(false);
+
+            // 1. Ensure dealership row exists (always dealership_id=1)
+            int dealershipId = upsertDealership(conn, d);
+
+            // 2. Remove old vehicles
+            String deleteSql = "DELETE FROM vehicles WHERE dealership_id = ?";
+            try (PreparedStatement ps = conn.prepareStatement(deleteSql)) {
+                ps.setInt(1, dealershipId);
+                ps.executeUpdate();
             }
 
-            System.out.println("✅ Dealership data saved successfully.");
+            // 3. Insert current vehicles
+            String insertSql = """
+                INSERT INTO vehicles
+                (vin, make, model, year, price, color, sold, dealership_id, odometer)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """;
 
-        } catch (IOException e) {
-            System.err.println("❌ Failed to save dealership file: " + e.getMessage());
+            try (PreparedStatement ps = conn.prepareStatement(insertSql)) {
+                for (Vehicle v : d.getAllVehicles()) {
+
+                    ps.setString(1, String.valueOf(v.getVin()));
+                    ps.setString(2, v.getMake());
+                    ps.setString(3, v.getModel());
+                    ps.setInt(4, v.getYear());
+                    ps.setDouble(5, v.getPrice());
+                    ps.setString(6, v.getColor());
+
+                    boolean isSold = v.getType().equalsIgnoreCase("Sold");
+                    ps.setBoolean(7, isSold);
+
+                    ps.setInt(8, dealershipId);
+                    ps.setInt(9, (int) v.getOdometer());
+
+                    ps.addBatch();
+                }
+
+                ps.executeBatch();
+            }
+
+            conn.commit();
+            System.out.println("✅ Dealership + vehicles saved to Supabase.");
+
+        } catch (SQLException e) {
+            System.err.println("❌ Error saving dealership to Supabase: " + e.getMessage());
         }
     }
 
-    // --- Helper Parsing Methods ---
-    private static int parseInt(String s, int def) {
-        try {
-            return Integer.parseInt(s.trim());
-        } catch (Exception e) {
-            return def;
+    private int upsertDealership(Connection conn, Dealership d) throws SQLException {
+        String upsertSql = """
+            INSERT INTO dealerships (dealership_id, name, address, phone)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT (dealership_id)
+            DO UPDATE SET
+              name = EXCLUDED.name,
+              address = EXCLUDED.address,
+              phone = EXCLUDED.phone
+        """;
+
+        try (PreparedStatement ps = conn.prepareStatement(upsertSql)) {
+            ps.setString(1, d.getName());
+            ps.setString(2, d.getAddress());
+            ps.setString(3, d.getPhone());
+            ps.executeUpdate();
         }
-    }
 
-    private static long parseLong(String s, long def) {
-        try {
-            return Long.parseLong(s.trim());
-        } catch (Exception e) {
-            return def;
-        }
-    }
-
-    private static double parseDouble(String s, double def) {
-        try {
-            return Double.parseDouble(s.trim());
-        } catch (Exception e) {
-            return def;
-        }
-    }
-
-    // --- Data Validation ---
-    private boolean isValidVehicleData(String[] p) {
-        try {
-            if (p.length < 8) return false;
-
-            Integer.parseInt(p[0].trim()); // vin
-            Integer.parseInt(p[1].trim()); // year
-            Long.parseLong(p[6].trim());   // odometer
-            Double.parseDouble(p[7].trim()); // price
-
-            // Validate required strings are not blank
-            return !p[2].isBlank() && !p[3].isBlank() && !p[4].isBlank() && !p[5].isBlank();
-        } catch (Exception e) {
-            return false;
-        }
+        return 1;
     }
 }
